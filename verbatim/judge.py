@@ -8,10 +8,11 @@ code then thresholds and sorts; TypeSafe never sees the whole corpus at once.
 
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 
-from typesafe_sdk import Noul, TypeSafeClient
+import anyio
+from asyncer import create_task_group
+from typesafe_sdk import AsyncTypeSafeClient, Noul
 
 from .ingest import Passage
 
@@ -73,44 +74,48 @@ class JudgedPassage:
         return (self.relevant + self.usable) / 2
 
 
-def judge_candidates(
-    client: TypeSafeClient,
+async def judge_candidates(
+    client: AsyncTypeSafeClient,
     query: str,
     candidates: list[Passage],
-    max_workers: int,
+    max_concurrency: int,
 ) -> list[JudgedPassage]:
-    """Score every candidate against the query in parallel, one TypeSafe
-    request per pair -- each question is about exactly one passage."""
+    """Score every candidate against the query concurrently, one TypeSafe
+    request per pair -- each question is about exactly one passage. A semaphore
+    bounds how many requests are in flight at once."""
+    limit = anyio.Semaphore(max_concurrency)
 
-    def judge_one(passage: Passage) -> JudgedPassage:
-        response = client.system_one(
-            state={
-                "query": query,
-                "passage": {
-                    "source": passage.source,
-                    "section_context": passage.context,
-                    "text": passage.text,
+    async def judge_one(passage: Passage) -> JudgedPassage:
+        async with limit:
+            response = await client.system_one(
+                state={
+                    "query": query,
+                    "passage": {
+                        "source": passage.source,
+                        "section_context": passage.context,
+                        "text": passage.text,
+                    },
                 },
-            },
-            questions={"relevant": _RELEVANT, "usable": _USABLE},
-        )
+                questions={"relevant": _RELEVANT, "usable": _USABLE},
+            )
         return JudgedPassage(
             passage=passage,
             relevant=response.answers["relevant"].noul,
             usable=response.answers["usable"].noul,
         )
 
-    with ThreadPoolExecutor(max_workers=max_workers) as pool:
-        return list(pool.map(judge_one, candidates))
+    async with create_task_group() as tg:
+        results = [tg.soonify(judge_one)(p) for p in candidates]
+    return [r.value for r in results]
 
 
-def check_answerable(client: TypeSafeClient, query: str, evidence: list[Passage]) -> float:
+async def check_answerable(client: AsyncTypeSafeClient, query: str, evidence: list[Passage]) -> float:
     """Probability that the surviving evidence -- and only that evidence --
     answers the query. This is what lets the app say "not found" instead of
     confidently returning irrelevant excerpts."""
     if not evidence:
         return 0.0
-    response = client.system_one(
+    response = await client.system_one(
         state={
             "query": query,
             "evidence": [{"source": p.source, "text": p.display_text} for p in evidence],

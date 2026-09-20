@@ -49,16 +49,16 @@
   h1 { font-size: 1.4rem; margin: 0 0 0.25rem; }
   h2 { font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); margin: 0 0 0.6rem; }
   p.lede { color: var(--muted); margin: 0 0 1.75rem; }
-  section { margin-bottom: 1.75rem; }
   section.panel {
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 12px;
     padding: 1rem 1.1rem;
+    margin-bottom: 1.25rem;
   }
   form { display: flex; gap: 0.5rem; }
-  form.ask-form { margin-bottom: 1.5rem; }
-  input[type="text"] {
+  form.ask-form { margin-bottom: 0.6rem; }
+  input[type="text"], input[type="password"] {
     flex: 1;
     min-width: 0;
     padding: 0.65rem 0.85rem;
@@ -68,7 +68,7 @@
     color: var(--text);
     font-size: 1rem;
   }
-  input[type="text"]:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
   input[type="file"] { flex: 1; min-width: 0; color: var(--text); font-size: 0.9rem; }
   button {
     padding: 0.65rem 1.1rem;
@@ -82,6 +82,15 @@
     white-space: nowrap;
   }
   button:disabled { opacity: 0.6; cursor: default; }
+  button.link {
+    padding: 0;
+    background: none;
+    color: var(--accent);
+    font-size: 0.85rem;
+    font-weight: 500;
+  }
+  .option { display: block; margin-bottom: 1.5rem; color: var(--muted); font-size: 0.85rem; }
+  .option input { margin-right: 0.35rem; }
   .doc-list { list-style: none; margin: 0 0 0.85rem; padding: 0; display: flex; flex-wrap: wrap; gap: 0.5rem; }
   .doc-chip {
     display: inline-flex;
@@ -93,6 +102,7 @@
     border: 1px solid var(--border);
     font-size: 0.85rem;
   }
+  .doc-chip small { color: var(--muted); }
   .doc-chip button {
     padding: 0;
     width: 1.2rem;
@@ -104,6 +114,7 @@
     font-size: 0.95rem;
   }
   .doc-chip button:hover { background: var(--border); color: var(--text); }
+  .doc-tools { display: flex; gap: 1rem; margin-top: 0.75rem; }
   .verdict-row { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 1rem; }
   .badge {
     display: inline-block;
@@ -126,35 +137,72 @@
     padding: 0.75rem 0.9rem;
   }
   .excerpt p { margin: 0 0 0.4rem; }
+  .excerpt:target { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
+  .answer {
+    margin: 0 0 0.6rem;
+    padding: 0.85rem 1rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--answered);
+    border-radius: 10px;
+    font-size: 1.02rem;
+  }
+  .answer.pending:empty::before { content: "Verifying statements…"; color: var(--muted); font-style: italic; }
+  .cite { color: var(--accent); font-size: 0.8rem; font-weight: 600; text-decoration: none; }
+  .cite:hover { text-decoration: underline; }
+  .answer-note { margin: 0 0 1rem; color: var(--muted); font-size: 0.8rem; }
   .scores { color: var(--muted); font-size: 0.8rem; }
   .empty, .status { color: var(--muted); font-style: italic; }
-  .error { color: var(--not-found); }
+  .error { color: var(--not-found); font-style: normal; }
+  .fineprint { color: var(--muted); font-size: 0.8rem; margin: 0.75rem 0 0; }
   [hidden] { display: none !important; }
 </style>
 </head>
 <body>
 <main>
-  <h1>Document Q&amp;A</h1>
+  <h1>Verbatim</h1>
   <p class="lede">
-    Every answer below is an excerpt pulled straight from a document you've
-    added, ranked and gated by TypeSafe's typed judgments. Nothing here is
-    generated.
+    Ask questions about your documents and get the exact passages that answer
+    them. Your library is stored in this browser; nothing is kept on the server.
   </p>
 
+  <section id="token-panel" class="panel" hidden>
+    <h2>Access token</h2>
+    <form id="token-form">
+      <input id="token-input" type="password" placeholder="Paste your access token" autocomplete="off" />
+      <button type="submit">Unlock</button>
+    </form>
+    <p id="token-status" class="status" hidden></p>
+  </section>
+
   <section class="panel">
-    <h2>Documents</h2>
+    <h2>Your documents</h2>
     <ul id="doc-list" class="doc-list"></ul>
     <form id="upload-form">
       <input id="upload-input" type="file" multiple accept=".pdf,.txt,.md,.markdown" />
       <button id="upload-button" type="submit">Add</button>
     </form>
     <p id="upload-status" class="status" hidden></p>
+    <div class="doc-tools">
+      <button id="export-button" type="button" class="link">Export library</button>
+      <button id="import-button" type="button" class="link">Import library</button>
+      <input id="import-input" type="file" accept=".json,application/json" hidden />
+    </div>
+    <p class="fineprint">
+      Stored in this browser only: clearing site data deletes it, and it doesn't
+      follow you to other devices. Export a backup to keep it. Each question sends
+      your passages to the server, TypeSafe, and Gemini.
+    </p>
   </section>
 
   <form id="ask-form" class="ask-form">
     <input id="query" type="text" placeholder="Ask something about your documents…" autocomplete="off" />
     <button id="ask-button" type="submit">Ask</button>
   </form>
+  <label class="option">
+    <input id="write-answer" type="checkbox" checked />
+    <span id="write-answer-label">Write an answer with Gemini — every statement is checked against your documents before it appears</span>
+  </label>
 
   <p id="status" class="status" hidden></p>
   <div id="result" hidden>
@@ -162,161 +210,361 @@
       <span id="badge" class="badge"></span>
       <span id="confidence" class="confidence"></span>
     </div>
+    <p id="answer" class="answer" hidden></p>
+    <p id="answer-note" class="answer-note" hidden></p>
     <ol id="excerpts" class="excerpts"></ol>
   </div>
 </main>
 
 <script>
-  const docList = document.getElementById("doc-list");
-  const uploadForm = document.getElementById("upload-form");
-  const uploadInput = document.getElementById("upload-input");
-  const uploadButton = document.getElementById("upload-button");
-  const uploadStatus = document.getElementById("upload-status");
-
-  const form = document.getElementById("ask-form");
-  const input = document.getElementById("query");
-  const button = document.getElementById("ask-button");
-  const statusEl = document.getElementById("status");
-  const resultEl = document.getElementById("result");
-  const badgeEl = document.getElementById("badge");
-  const confidenceEl = document.getElementById("confidence");
-  const excerptsEl = document.getElementById("excerpts");
-
+  const $ = (id) => document.getElementById(id);
   const VERDICT_LABEL = { answered: "Answered", partial: "Partial", not_found: "Not found" };
 
-  function warnAboutEmpty(data) {
-    if (!data.empty_documents.length) return false;
-    uploadStatus.hidden = false;
-    uploadStatus.className = "status error";
-    uploadStatus.textContent =
-      `No searchable text could be read from: ${data.empty_documents.join(", ")}. ` +
-      "Questions about it won't find anything.";
-    return true;
+  // ---------------------------------------------------------------- storage
+  // The library lives in IndexedDB: one record per document, holding the
+  // passages the server's /api/ingest returned for it. (localStorage is capped
+  // around 5 MB and blocks the page, so it can't hold a corpus.)
+  const DB_NAME = "verbatim";
+  const STORE = "documents";
+
+  function openDb() {
+    return new Promise((resolve, reject) => {
+      const request = indexedDB.open(DB_NAME, 1);
+      request.onupgradeneeded = () => request.result.createObjectStore(STORE, { keyPath: "name" });
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
   }
 
-  function renderDocs(data) {
-    const names = data.documents;
-    docList.innerHTML = "";
-    if (names.length === 0) {
+  async function run(mode, action) {
+    const db = await openDb();
+    try {
+      return await new Promise((resolve, reject) => {
+        const transaction = db.transaction(STORE, mode);
+        const request = action(transaction.objectStore(STORE));
+        transaction.oncomplete = () => resolve(request.result);
+        transaction.onerror = () => reject(transaction.error);
+        transaction.onabort = () => reject(transaction.error);
+      });
+    } finally {
+      db.close();
+    }
+  }
+
+  const listDocuments = () => run("readonly", (store) => store.getAll());
+  const saveDocument = (doc) => run("readwrite", (store) => store.put(doc));
+  const deleteDocument = (name) => run("readwrite", (store) => store.delete(name));
+
+  // The token is a per-browser convenience; storage can be blocked, so guard it.
+  function getToken() {
+    try { return localStorage.getItem("verbatim.token") || ""; } catch { return ""; }
+  }
+  function setToken(value) {
+    try { localStorage.setItem("verbatim.token", value); } catch { /* not persisted */ }
+  }
+
+  // -------------------------------------------------------------------- api
+  let serverConfig = { auth_required: false, gemini_configured: true, max_upload_bytes: 4 * 1024 * 1024, max_request_passages: 500 };
+
+  class ApiError extends Error {}
+
+  function authHeaders(extra = {}) {
+    const token = getToken();
+    return token ? { ...extra, Authorization: `Bearer ${token}` } : extra;
+  }
+
+  async function errorMessage(response) {
+    const body = await response.json().catch(() => null);
+    const detail = body?.detail;
+    if (typeof detail === "string") return detail;
+    if (Array.isArray(detail)) return detail.map((d) => d.msg).join("; ");
+    return `Request failed (${response.status})`;
+  }
+
+  // Every protected call goes through here so a rejected token brings the
+  // token prompt back instead of a confusing error.
+  async function api(path, options = {}) {
+    const response = await fetch(path, { ...options, headers: authHeaders(options.headers) });
+    if (response.status === 401) {
+      showTokenPanel("That token was rejected. Paste the current one.");
+      throw new ApiError("Access token required.");
+    }
+    if (!response.ok) throw new ApiError(await errorMessage(response));
+    return response;
+  }
+
+  function showTokenPanel(message) {
+    $("token-panel").hidden = false;
+    if (message) {
+      $("token-status").hidden = false;
+      $("token-status").className = "status error";
+      $("token-status").textContent = message;
+    }
+  }
+
+  // --------------------------------------------------------------- documents
+  function setStatus(el, message, isError = false) {
+    el.hidden = !message;
+    el.className = isError ? "status error" : "status";
+    el.textContent = message ?? "";
+  }
+
+  async function renderDocs() {
+    const docs = await listDocuments();
+    const list = $("doc-list");
+    list.innerHTML = "";
+    if (docs.length === 0) {
       const li = document.createElement("li");
       li.className = "empty";
       li.textContent = "No documents yet — add one below.";
-      docList.appendChild(li);
-      return;
+      list.appendChild(li);
+      return docs;
     }
-    for (const name of names) {
+    for (const doc of docs.sort((a, b) => a.name.localeCompare(b.name))) {
       const li = document.createElement("li");
       li.className = "doc-chip";
       const label = document.createElement("span");
-      label.textContent = name;
+      label.textContent = doc.name;
+      const count = document.createElement("small");
+      count.textContent = `${doc.passages.length} passages`;
       const remove = document.createElement("button");
       remove.type = "button";
       remove.textContent = "×";
-      remove.title = `Remove ${name}`;
-      remove.addEventListener("click", () => removeDocument(name));
-      li.append(label, remove);
-      docList.appendChild(li);
+      remove.title = `Remove ${doc.name}`;
+      remove.addEventListener("click", async () => {
+        await deleteDocument(doc.name);
+        await renderDocs();
+      });
+      li.append(label, count, remove);
+      list.appendChild(li);
     }
+    return docs;
   }
 
-  async function loadDocuments() {
-    const response = await fetch("/api/documents");
-    const data = await response.json();
-    renderDocs(data);
-    warnAboutEmpty(data);
-  }
-
-  async function removeDocument(name) {
-    uploadStatus.hidden = false;
-    uploadStatus.className = "status";
-    uploadStatus.textContent = `Removing ${name}…`;
-    try {
-      const response = await fetch(`/api/documents/${encodeURIComponent(name)}`, { method: "DELETE" });
-      if (!response.ok) {
-        const body = await response.json().catch(() => null);
-        throw new Error(body?.detail ?? `Request failed (${response.status})`);
-      }
-      const data = await response.json();
-      renderDocs(data);
-      uploadStatus.hidden = true;
-      warnAboutEmpty(data);
-    } catch (err) {
-      uploadStatus.className = "status error";
-      uploadStatus.textContent = err instanceof Error ? err.message : "Could not remove that document.";
-    }
-  }
-
-  uploadForm.addEventListener("submit", async (event) => {
+  // Sends each file to /api/ingest (parse + OCR, stored nowhere server-side) and
+  // keeps the returned passages in IndexedDB.
+  $("upload-form").addEventListener("submit", async (event) => {
     event.preventDefault();
-    const files = uploadInput.files;
-    if (!files || files.length === 0) return;
+    const files = Array.from($("upload-input").files ?? []);
+    if (files.length === 0) return;
 
-    uploadButton.disabled = true;
-    uploadStatus.hidden = false;
-    uploadStatus.className = "status";
-    uploadStatus.textContent = "Ingesting… scanned PDFs are OCR'd, which can take a minute or more.";
-
-    const body = new FormData();
-    for (const file of files) body.append("files", file);
-
+    $("upload-button").disabled = true;
+    const problems = [];
+    let added = 0;
     try {
-      const response = await fetch("/api/documents", { method: "POST", body });
-      if (!response.ok) {
-        const errBody = await response.json().catch(() => null);
-        throw new Error(errBody?.detail ?? `Request failed (${response.status})`);
+      for (const file of files) {
+        if (file.size > serverConfig.max_upload_bytes) {
+          problems.push(`${file.name} is over the ${Math.floor(serverConfig.max_upload_bytes / 1048576)} MB limit`);
+          continue;
+        }
+        setStatus($("upload-status"), `Reading ${file.name}… scanned PDFs are OCR'd, which can take a minute or more.`);
+        const body = new FormData();
+        body.append("file", file);
+        try {
+          const result = await (await api("/api/ingest", { method: "POST", body })).json();
+          if (result.passages.length === 0) {
+            problems.push(`no searchable text could be read from ${file.name}`);
+            continue;
+          }
+          await saveDocument({ name: result.document, size: file.size, addedAt: Date.now(), passages: result.passages });
+          added += 1;
+        } catch (err) {
+          if (err instanceof ApiError && err.message === "Access token required.") throw err;
+          problems.push(`${file.name}: ${err instanceof Error ? err.message : "failed"}`);
+        }
       }
-      const data = await response.json();
-      renderDocs(data);
-      uploadStatus.textContent = `Ready — ${data.passage_count} passages indexed.`;
-      warnAboutEmpty(data);
-      uploadForm.reset();
+      // Ask the browser not to evict the library under storage pressure (best effort).
+      try { await navigator.storage?.persist?.(); } catch { /* ignore */ }
+      $("upload-form").reset();
+      await renderDocs();
+      if (problems.length) setStatus($("upload-status"), problems.join("; "), true);
+      else setStatus($("upload-status"), `Added ${added} document${added === 1 ? "" : "s"}.`);
     } catch (err) {
-      uploadStatus.className = "status error";
-      uploadStatus.textContent = err instanceof Error ? err.message : "Upload failed.";
+      setStatus($("upload-status"), err instanceof Error ? err.message : "Upload failed.", true);
     } finally {
-      uploadButton.disabled = false;
+      $("upload-button").disabled = false;
     }
   });
 
-  form.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const q = input.value.trim();
-    if (!q) return;
-
-    button.disabled = true;
-    resultEl.hidden = true;
-    statusEl.hidden = false;
-    statusEl.className = "status";
-    statusEl.textContent = "Judging passages…";
-
-    try {
-      const response = await fetch(`/api/ask?q=${encodeURIComponent(q)}`);
-      if (!response.ok) {
-        const body = await response.json().catch(() => null);
-        throw new Error(body?.detail ?? `Request failed (${response.status})`);
-      }
-      const data = await response.json();
-      render(data);
-      statusEl.hidden = true;
-    } catch (err) {
-      statusEl.className = "status error";
-      statusEl.textContent = err instanceof Error ? err.message : "Something went wrong.";
-    } finally {
-      button.disabled = false;
-    }
+  // Backups: browser storage can be cleared, so the library can be exported.
+  $("export-button").addEventListener("click", async () => {
+    const docs = await listDocuments();
+    const blob = new Blob([JSON.stringify({ version: 1, documents: docs })], { type: "application/json" });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = "verbatim-library.json";
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(link.href), 1000);
   });
 
-  function render(data) {
-    badgeEl.textContent = VERDICT_LABEL[data.verdict] ?? data.verdict;
-    badgeEl.className = `badge ${data.verdict}`;
-    confidenceEl.textContent = `confidence ${data.confidence.toFixed(2)}`;
+  $("import-button").addEventListener("click", () => $("import-input").click());
+  $("import-input").addEventListener("change", async () => {
+    const file = $("import-input").files?.[0];
+    if (!file) return;
+    try {
+      const data = JSON.parse(await file.text());
+      const valid = (d) => d && typeof d.name === "string" && Array.isArray(d.passages);
+      const docs = (data.documents ?? []).filter(valid);
+      for (const doc of docs) await saveDocument(doc);
+      await renderDocs();
+      setStatus($("upload-status"), `Imported ${docs.length} document${docs.length === 1 ? "" : "s"}.`);
+    } catch {
+      setStatus($("upload-status"), "That file isn't a Verbatim library export.", true);
+    }
+    $("import-input").value = "";
+  });
 
-    excerptsEl.innerHTML = "";
+  // ----------------------------------------------------------------- results
+  let activeAbort = null;
+
+  function showProgress(message) { setStatus($("status"), message); }
+  function showError(message) { setStatus($("status"), message, true); }
+
+  function setVerdict(verdict, confidence) {
+    $("badge").textContent = VERDICT_LABEL[verdict] ?? verdict;
+    $("badge").className = `badge ${verdict}`;
+    $("confidence").textContent = `confidence ${confidence.toFixed(2)}`;
+  }
+
+  // Numbered sources: the excerpts every statement cites. Always shown, so an
+  // answer can be checked against the text it came from.
+  function renderSources(sources) {
+    const list = $("excerpts");
+    list.innerHTML = "";
+    if (sources.length === 0) {
+      const li = document.createElement("li");
+      li.className = "empty";
+      li.textContent = "No relevant passages were found.";
+      list.appendChild(li);
+      return;
+    }
+    for (const src of sources) {
+      const li = document.createElement("li");
+      li.className = "excerpt";
+      li.id = `src-${src.number}`;
+      const p = document.createElement("p");
+      p.textContent = src.text;
+      const meta = document.createElement("div");
+      meta.className = "scores";
+      meta.textContent = `[${src.number}] ${src.citation}`;
+      li.append(p, meta);
+      list.appendChild(li);
+    }
+  }
+
+  function appendClaim(claim) {
+    const span = document.createElement("span");
+    span.append(`${claim.statement} `);
+    const cite = document.createElement("a");
+    cite.className = "cite";
+    cite.href = `#src-${claim.source_number}`;
+    cite.textContent = `[${claim.source_number}]`;
+    cite.title = `“${claim.quote}”`; // the exact source text that supports this statement
+    span.append(cite, " ");
+    $("answer").appendChild(span);
+  }
+
+  // Parses one Server-Sent Events frame ("event: x\ndata: {...}") into [event, data].
+  function parseFrame(frame) {
+    let event = "message";
+    const data = [];
+    for (const line of frame.split("\n")) {
+      if (line.startsWith("event:")) event = line.slice(6).trim();
+      else if (line.startsWith("data:")) data.push(line.slice(5).replace(/^ /, ""));
+    }
+    return data.length ? [event, JSON.parse(data.join("\n"))] : null;
+  }
+
+  // The question carries the passages, so the stream is a POST. EventSource can
+  // only GET (and can't send an Authorization header), so the stream is read
+  // with fetch instead.
+  async function streamAnswer(query, passages) {
+    const answerEl = $("answer");
+    answerEl.hidden = true;
+    answerEl.textContent = "";
+    answerEl.classList.remove("pending");
+    $("answer-note").hidden = true;
+
+    let verdict = "not_found";
+    const handlers = {
+      status: (d) => showProgress(d.message),
+      evidence: (d) => {
+        verdict = d.verdict;
+        setVerdict(d.verdict, d.confidence);
+        renderSources(d.sources);
+        $("result").hidden = false;
+        if (d.verdict !== "not_found") {
+          answerEl.hidden = false;
+          answerEl.classList.add("pending");
+        }
+      },
+      claim: appendClaim,
+      done: (d) => {
+        setStatus($("status"), "");
+        answerEl.classList.remove("pending");
+        if (verdict !== "not_found" && d.claim_count === 0) {
+          answerEl.textContent =
+            "No statement could be verified against the sources, so none is shown. " +
+            "The excerpts below are the exact source text.";
+        }
+        if (d.withheld_reasons.length > 0) {
+          const reasons = [...new Set(d.withheld_reasons)].join("; ");
+          $("answer-note").textContent = `${d.withheld_reasons.length} unverified statement(s) withheld (${reasons}).`;
+          $("answer-note").hidden = false;
+        }
+      },
+      error: (d) => {
+        showError(d.message);
+        // Don't leave an empty "Verifying statements…" box behind.
+        answerEl.classList.remove("pending");
+        if (!answerEl.textContent) answerEl.hidden = true;
+      },
+    };
+
+    const response = await api("/api/answer/stream", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query, passages }),
+      signal: activeAbort.signal,
+    });
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, "\n");
+      let end;
+      while ((end = buffer.indexOf("\n\n")) !== -1) {
+        const parsed = parseFrame(buffer.slice(0, end));
+        buffer = buffer.slice(end + 2);
+        if (parsed) handlers[parsed[0]]?.(parsed[1]);
+      }
+    }
+  }
+
+  // Extractive mode: ranked excerpts with their TypeSafe scores, no written answer.
+  async function askExcerpts(query, passages) {
+    const data = await (
+      await api("/api/ask", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query, passages }),
+        signal: activeAbort.signal,
+      })
+    ).json();
+
+    $("answer").hidden = true;
+    $("answer-note").hidden = true;
+    setVerdict(data.verdict, data.confidence);
+    const list = $("excerpts");
+    list.innerHTML = "";
     if (data.excerpts.length === 0) {
       const li = document.createElement("li");
       li.className = "empty";
       li.textContent = "No relevant passages were found.";
-      excerptsEl.appendChild(li);
+      list.appendChild(li);
     } else {
       for (const excerpt of data.excerpts) {
         const li = document.createElement("li");
@@ -327,13 +575,86 @@
         scores.className = "scores";
         scores.textContent = `${excerpt.source} · relevant ${excerpt.relevant.toFixed(2)} · usable ${excerpt.usable.toFixed(2)}`;
         li.append(p, scores);
-        excerptsEl.appendChild(li);
+        list.appendChild(li);
       }
     }
-    resultEl.hidden = false;
+    $("result").hidden = false;
+    setStatus($("status"), "");
   }
 
-  loadDocuments();
+  $("ask-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const query = $("query").value.trim();
+    if (!query) return;
+
+    const docs = await listDocuments();
+    const passages = docs.flatMap((d) => d.passages);
+    if (passages.length === 0) {
+      showError("Add a document first.");
+      return;
+    }
+    if (passages.length > serverConfig.max_request_passages) {
+      showError(
+        `Your library has ${passages.length} passages; one question can search at most ` +
+        `${serverConfig.max_request_passages}. Remove a document or two.`
+      );
+      return;
+    }
+
+    if (activeAbort) activeAbort.abort();
+    activeAbort = new AbortController();
+    $("ask-button").disabled = true;
+    $("result").hidden = true;
+    showProgress("Starting…");
+
+    try {
+      if ($("write-answer").checked) await streamAnswer(query, passages);
+      else await askExcerpts(query, passages);
+    } catch (err) {
+      if (err?.name !== "AbortError") showError(err instanceof Error ? err.message : "Something went wrong.");
+    } finally {
+      $("ask-button").disabled = false;
+    }
+  });
+
+  // ------------------------------------------------------------------ startup
+  $("token-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const value = $("token-input").value.trim();
+    if (!value) return;
+    setToken(value);
+    try {
+      await api("/api/check");
+      $("token-panel").hidden = true;
+      $("token-input").value = "";
+    } catch { /* api() already showed why */ }
+  });
+
+  async function start() {
+    try {
+      serverConfig = await (await fetch("/api/config")).json();
+    } catch {
+      showError("Couldn't reach the server.");
+    }
+    if (!serverConfig.gemini_configured) {
+      $("write-answer").checked = false;
+      $("write-answer").disabled = true;
+      $("write-answer-label").textContent = "Written answers are unavailable: the server has no Gemini key configured.";
+    }
+    if (serverConfig.auth_required) {
+      try {
+        await api("/api/check");
+      } catch (err) {
+        // A missing/rejected token gets the token prompt; anything else (e.g. a
+        // server with no token configured) should say what actually went wrong.
+        if (err instanceof ApiError && err.message !== "Access token required.") showError(err.message);
+        else showTokenPanel(getToken() ? undefined : "This server needs an access token.");
+      }
+    }
+    await renderDocs();
+  }
+
+  start();
 </script>
 </body>
 </html>

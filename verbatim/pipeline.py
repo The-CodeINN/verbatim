@@ -1,23 +1,36 @@
-"""Orchestrates the extractive RAG pipeline:
+"""Orchestrates the grounded RAG pipeline:
 
     BM25 shortlist -> TypeSafe rerank + gate -> existence check -> excerpts
 
-There is no generation step anywhere. The "answer" this returns is always
-the corpus's own text, selected and ranked -- never synthesized.
+The engine is stateless: every call is given the passages to search, so it
+holds no documents, index, or files between calls. That is what lets it run on
+serverless hosts (where memory and disk don't persist and instances don't
+share state) with the browser -- or, for the CLI, a local folder -- as the
+library.
+
+ask() stops at the excerpts: the answer is the source text itself, selected
+and ranked, never synthesized. answer() goes one step further -- Gemini writes
+cited statements from those excerpts, and every statement is verified against
+its source (see verify.py) before it is returned.
 """
 
 from __future__ import annotations
 
-import threading
+from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass
-from pathlib import Path
+from typing import TYPE_CHECKING
 
-from typesafe_sdk import TypeSafeClient
+from asyncer import asyncify
+from typesafe_sdk import AsyncTypeSafeClient
 
 from . import config
-from .ingest import discover_documents, load_corpus
+from .ingest import Passage
 from .judge import JudgedPassage, check_answerable, judge_candidates
 from .retrieval import BM25Index
+from .verify import VerifiedClaim, WithheldClaim, verify_claims
+
+if TYPE_CHECKING:
+    from .generate import ClaimWriter
 
 
 def _group_key(judged: JudgedPassage) -> tuple[str, str]:
@@ -83,66 +96,91 @@ class AnswerResult:
     excerpts: list[JudgedPassage]
 
 
-class ExtractiveRag:
-    def __init__(self, corpus_dir: Path = config.CORPUS_DIR) -> None:
-        self._corpus_dir = corpus_dir
-        self._lock = threading.Lock()
-        self._index, self._documents, self._empty_documents = self._build_index()
-        self._client = TypeSafeClient()
+@dataclass(frozen=True)
+class GroundedAnswer:
+    """A written answer in which every statement passed verification.
 
-    def _build_index(self) -> tuple[BM25Index, list[str], list[str]]:
-        paths = discover_documents(self._corpus_dir)
-        passages = load_corpus(paths)
-        # A document that contributes no passages (unreadable, blank, OCR
-        # found nothing) would otherwise be silently unqueryable.
-        with_text = {p.source for p in passages}
-        empty = [p.name for p in paths if p.name not in with_text]
-        return BM25Index(passages), [p.name for p in paths], empty
+    `claims` holds only verified statements; `withheld` records what Gemini
+    proposed but failed a check. `evidence` is the numbered excerpt list the
+    claims cite, always shown so the answer can be checked by eye."""
 
-    def refresh(self) -> int:
-        """Re-scan the corpus directory and rebuild the search index --
-        call after adding/removing files. Returns the new passage count.
-        Safe alongside in-flight requests: ask() reads its own reference to
-        self._index once, and this only ever replaces that reference, never
-        mutates the object in place."""
-        with self._lock:
-            self._index, self._documents, self._empty_documents = self._build_index()
-            return len(self._index)
+    verdict: str  # "answered" | "partial" | "not_found"
+    confidence: float
+    evidence: list[JudgedPassage]
+    claims: list[VerifiedClaim]
+    withheld: list[WithheldClaim]
 
     @property
-    def corpus_dir(self) -> Path:
-        return self._corpus_dir
+    def text(self) -> str:
+        return " ".join(f"{c.statement} [{c.passage_number}]" for c in self.claims)
 
-    @property
-    def documents(self) -> list[str]:
-        return list(self._documents)
 
-    @property
-    def empty_documents(self) -> list[str]:
-        """Documents that were found but yielded no searchable text."""
-        return list(self._empty_documents)
+@dataclass(frozen=True)
+class Status:
+    """Progress note for the UI ("Judging 90 passages…")."""
 
-    def __len__(self) -> int:
-        return len(self._index)
+    message: str
 
-    def close(self) -> None:
-        self._client.close()
 
-    def __enter__(self) -> "ExtractiveRag":
+@dataclass(frozen=True)
+class EvidenceFound:
+    """The numbered excerpts any claims will cite, plus the answerability verdict."""
+
+    verdict: str
+    confidence: float
+    evidence: list[JudgedPassage]
+
+
+@dataclass(frozen=True)
+class ClaimVerified:
+    claim: VerifiedClaim
+
+
+@dataclass(frozen=True)
+class Finished:
+    answer: GroundedAnswer
+
+
+AnswerEvent = Status | EvidenceFound | ClaimVerified | Finished
+
+
+class Engine:
+    """Answers questions over whatever passages it is handed."""
+
+    def __init__(self) -> None:
+        self._client = AsyncTypeSafeClient()
+        self._writer: ClaimWriter | None = None  # built on first use; see _get_writer
+
+    async def aclose(self) -> None:
+        await self._client.aclose()
+        if self._writer is not None:
+            await self._writer.aclose()
+
+    async def __aenter__(self) -> "Engine":
         return self
 
-    def __exit__(self, *exc_info: object) -> None:
-        self.close()
+    async def __aexit__(self, *exc_info: object) -> None:
+        await self.aclose()
 
-    def ask(self, query: str) -> AnswerResult:
-        index = self._index  # snapshot: unaffected by a concurrent refresh()
-        corpus_size = len(index)
-        k = corpus_size if corpus_size <= config.FULL_SCAN_MAX_PASSAGES else config.SHORTLIST_SIZE
-        shortlist = index.shortlist(query, k)
-        if not shortlist:
-            return AnswerResult(verdict="not_found", confidence=1.0, excerpts=[])
+    def _get_writer(self) -> "ClaimWriter":
+        """The Gemini/ADK writer is created on first use, so extractive-only
+        use never pays for (or needs credentials for) Google ADK. There is no
+        await between the check and the assignment, so this can't race."""
+        if self._writer is None:
+            from .generate import ClaimWriter
 
-        judged = judge_candidates(self._client, query, shortlist, config.MAX_WORKERS)
+            self._writer = ClaimWriter()
+        return self._writer
+
+    @staticmethod
+    def _shortlist(query: str, passages: Sequence[Passage]) -> list[Passage]:
+        """Small corpora are judged in full; BM25 only narrows large ones."""
+        if len(passages) <= config.FULL_SCAN_MAX_PASSAGES:
+            return list(passages)
+        return BM25Index(list(passages)).shortlist(query, config.SHORTLIST_SIZE)
+
+    async def _rank(self, query: str, shortlist: list[Passage]) -> list[JudgedPassage]:
+        judged = await judge_candidates(self._client, query, shortlist, config.MAX_WORKERS)
         gated = [
             j
             for j in judged
@@ -150,14 +188,64 @@ class ExtractiveRag:
             and j.usable >= config.THRESHOLDS["usable_min"]
         ]
         gated.sort(key=lambda j: j.combined, reverse=True)
-        kept = _diversify(gated, config.MAX_EXCERPTS, config.MAX_PER_CONTEXT, config.STRONG_MIN)
+        return _diversify(gated, config.MAX_EXCERPTS, config.MAX_PER_CONTEXT, config.STRONG_MIN)
 
-        confidence = check_answerable(self._client, query, [j.passage for j in kept])
+    async def _assess(self, query: str, kept: list[JudgedPassage]) -> AnswerResult:
+        confidence = await check_answerable(self._client, query, [j.passage for j in kept])
         if confidence >= config.ANSWERED_MIN:
             verdict = "answered"
         elif confidence >= config.PARTIAL_MIN:
             verdict = "partial"
         else:
             verdict = "not_found"
-
         return AnswerResult(verdict=verdict, confidence=confidence, excerpts=kept)
+
+    async def ask(self, query: str, passages: Sequence[Passage]) -> AnswerResult:
+        shortlist = await asyncify(self._shortlist)(query, passages)
+        if not shortlist:
+            return AnswerResult(verdict="not_found", confidence=1.0, excerpts=[])
+        return await self._assess(query, await self._rank(query, shortlist))
+
+    async def answer_stream(
+        self, query: str, passages: Sequence[Passage]
+    ) -> AsyncIterator[AnswerEvent]:
+        """Retrieve and gate evidence exactly as ask() does, then have Gemini
+        write from that evidence alone and verify every statement -- yielding
+        progress as it goes. Only verified claims are ever yielded as claims;
+        Gemini's raw output is never streamed, because it is unverified until
+        verify.py has checked it. When the evidence doesn't answer the
+        question, Gemini is never called."""
+        yield Status("Searching your documents…")
+        shortlist = await asyncify(self._shortlist)(query, passages)
+        if not shortlist:
+            result = AnswerResult(verdict="not_found", confidence=1.0, excerpts=[])
+        else:
+            yield Status(f"Judging {len(shortlist)} passages with TypeSafe…")
+            kept = await self._rank(query, shortlist)
+            yield Status("Checking whether the evidence answers the question…")
+            result = await self._assess(query, kept)
+
+        yield EvidenceFound(result.verdict, result.confidence, result.excerpts)
+        if result.verdict == "not_found" or not result.excerpts:
+            yield Finished(GroundedAnswer(result.verdict, result.confidence, result.excerpts, [], []))
+            return
+
+        evidence = [j.passage for j in result.excerpts]
+        writer = self._get_writer()
+        yield Status("Gemini is drafting cited statements…")
+        drafts = await writer.draft(query, evidence)
+        yield Status(f"Verifying {len(drafts)} statement(s) against your documents…")
+        claims, withheld = await verify_claims(self._client, drafts, evidence)
+
+        for claim in claims:
+            yield ClaimVerified(claim)
+        yield Finished(GroundedAnswer(result.verdict, result.confidence, result.excerpts, claims, withheld))
+
+    async def answer(self, query: str, passages: Sequence[Passage]) -> GroundedAnswer:
+        """Non-streaming form of answer_stream(): just the final result."""
+        final: GroundedAnswer | None = None
+        async for event in self.answer_stream(query, passages):
+            if isinstance(event, Finished):
+                final = event.answer
+        assert final is not None  # answer_stream always ends with Finished
+        return final

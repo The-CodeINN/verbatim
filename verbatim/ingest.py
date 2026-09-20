@@ -27,6 +27,7 @@ from pathlib import Path
 
 from pypdf import PdfReader
 
+from . import config
 from .ocr import ocr_pages
 
 logger = logging.getLogger(__name__)
@@ -36,7 +37,10 @@ _TEXT_SUFFIXES = {".txt", ".md", ".markdown"}
 SUPPORTED_SUFFIXES = _TEXT_SUFFIXES | {_PDF_SUFFIX}
 
 # U+FFFD is accepted defensively: some PDFs' bullet glyphs decode to it.
-_BULLET_RE = re.compile(r"^(?:[•●◦�*-]|\d+[.)])\s+")
+# Bullet glyphs (including the middle dot OCR often reads them as) may sit flush
+# against the text ("·Reservoir engineer"); "-", "*" and "1." need a space so
+# "-5 degrees" or "2024" aren't mistaken for list items.
+_BULLET_RE = re.compile(r"^(?:[•·●◦�]\s*|[*-]\s+|\d+[.)]\s+)")
 _MD_HEADING_RE = re.compile(r"^#{1,6}\s+")
 _FIRST_ALPHA_RE = re.compile(r"[A-Za-z]")
 _MIN_PASSAGE_CHARS = 8
@@ -162,6 +166,22 @@ def _document_chunks(path: Path) -> list[tuple[int | None, str, bool]]:
     return _merge_lines(lines)
 
 
+def _split_long(text: str, limit: int) -> list[str]:
+    """Break text longer than `limit` into pieces at word boundaries. A file
+    with no paragraph or bullet structure would otherwise become one giant
+    passage, which is too big to send to a judge (or to accept over the API)."""
+    pieces: list[str] = []
+    while len(text) > limit:
+        cut = text.rfind(" ", 0, limit)
+        if cut < limit // 2:  # no sensible boundary: hard cut
+            cut = limit
+        pieces.append(text[:cut].strip())
+        text = text[cut:].strip()
+    if text:
+        pieces.append(text)
+    return pieces
+
+
 def load_corpus(paths: Iterable[Path]) -> list[Passage]:
     passages: list[Passage] = []
     for path in paths:
@@ -176,14 +196,15 @@ def load_corpus(paths: Iterable[Path]) -> list[Passage]:
             if len(text) < _MIN_PASSAGE_CHARS:
                 continue
             locator = f"p{page}-{i}" if page is not None else str(i)
-            passages.append(
-                Passage(
-                    id=f"{path.name}:{locator}",
-                    source=path.name,
-                    page=page,
-                    text=text,
-                    is_bullet=is_bullet,
-                    context=context,
+            for part, piece in enumerate(_split_long(text, config.MAX_PASSAGE_CHARS)):
+                passages.append(
+                    Passage(
+                        id=f"{path.name}:{locator}" + (f"~{part}" if part else ""),
+                        source=path.name,
+                        page=page,
+                        text=piece,
+                        is_bullet=is_bullet,
+                        context=context,
+                    )
                 )
-            )
     return passages

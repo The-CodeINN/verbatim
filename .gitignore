@@ -16,3 +16,6 @@ wheels/
 # Your documents stay local: only the empty folder is tracked
 corpus/*
 !corpus/.gitkeep
+
+# ADK dev UI session/artifact storage
+.adk/

@@ -94,7 +94,12 @@ def ocr_pages(path: Path, page_numbers: list[int]) -> dict[int, list[str]]:
                 cached[str(n)] = _ocr_page(pdf, n)
         finally:
             pdf.close()
-        config.OCR_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        cache_file.write_text(json.dumps(cached, ensure_ascii=False), encoding="utf-8")
+        # The cache only saves time; on a read-only or ephemeral filesystem a
+        # failed write must not throw away the OCR we just paid for.
+        try:
+            config.OCR_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+            cache_file.write_text(json.dumps(cached, ensure_ascii=False), encoding="utf-8")
+        except OSError:
+            pass
 
     return {n: cached[str(n)] for n in page_numbers}
