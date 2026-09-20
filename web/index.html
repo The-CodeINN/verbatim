@@ -1,0 +1,339 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Verbatim</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f7f7f5;
+    --surface: #ffffff;
+    --border: #e4e4e1;
+    --text: #1c1c1a;
+    --muted: #6b6b66;
+    --accent: #3d5a80;
+    --answered: #1e7d4b;
+    --answered-bg: #e6f4ec;
+    --partial: #9a6b12;
+    --partial-bg: #faf1de;
+    --not-found: #a13a3a;
+    --not-found-bg: #fbe9e9;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #17181a;
+      --surface: #201f22;
+      --border: #333336;
+      --text: #ececea;
+      --muted: #9a9a96;
+      --accent: #8fb4de;
+      --answered: #6fcf97;
+      --answered-bg: #16261d;
+      --partial: #e0b45c;
+      --partial-bg: #2a230f;
+      --not-found: #e08080;
+      --not-found-bg: #2a1616;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding-block: 2.5rem;
+    padding-inline: max(16px, env(safe-area-inset-left, 0px)) max(16px, env(safe-area-inset-right, 0px));
+    background: var(--bg);
+    color: var(--text);
+    font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  main { max-width: 640px; margin: 0 auto; }
+  h1 { font-size: 1.4rem; margin: 0 0 0.25rem; }
+  h2 { font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); margin: 0 0 0.6rem; }
+  p.lede { color: var(--muted); margin: 0 0 1.75rem; }
+  section { margin-bottom: 1.75rem; }
+  section.panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1rem 1.1rem;
+  }
+  form { display: flex; gap: 0.5rem; }
+  form.ask-form { margin-bottom: 1.5rem; }
+  input[type="text"] {
+    flex: 1;
+    min-width: 0;
+    padding: 0.65rem 0.85rem;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface);
+    color: var(--text);
+    font-size: 1rem;
+  }
+  input[type="text"]:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  input[type="file"] { flex: 1; min-width: 0; color: var(--text); font-size: 0.9rem; }
+  button {
+    padding: 0.65rem 1.1rem;
+    border: none;
+    border-radius: 8px;
+    background: var(--accent);
+    color: #fff;
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  button:disabled { opacity: 0.6; cursor: default; }
+  .doc-list { list-style: none; margin: 0 0 0.85rem; padding: 0; display: flex; flex-wrap: wrap; gap: 0.5rem; }
+  .doc-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.3rem 0.4rem 0.3rem 0.7rem;
+    border-radius: 999px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    font-size: 0.85rem;
+  }
+  .doc-chip button {
+    padding: 0;
+    width: 1.2rem;
+    height: 1.2rem;
+    line-height: 1;
+    border-radius: 999px;
+    background: transparent;
+    color: var(--muted);
+    font-size: 0.95rem;
+  }
+  .doc-chip button:hover { background: var(--border); color: var(--text); }
+  .verdict-row { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 1rem; }
+  .badge {
+    display: inline-block;
+    padding: 0.2rem 0.65rem;
+    border-radius: 999px;
+    font-size: 0.8rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+  }
+  .badge.answered { color: var(--answered); background: var(--answered-bg); }
+  .badge.partial { color: var(--partial); background: var(--partial-bg); }
+  .badge.not_found { color: var(--not-found); background: var(--not-found-bg); }
+  .confidence { color: var(--muted); font-size: 0.9rem; }
+  ol.excerpts { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.6rem; }
+  .excerpt {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 0.75rem 0.9rem;
+  }
+  .excerpt p { margin: 0 0 0.4rem; }
+  .scores { color: var(--muted); font-size: 0.8rem; }
+  .empty, .status { color: var(--muted); font-style: italic; }
+  .error { color: var(--not-found); }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Document Q&amp;A</h1>
+  <p class="lede">
+    Every answer below is an excerpt pulled straight from a document you've
+    added, ranked and gated by TypeSafe's typed judgments. Nothing here is
+    generated.
+  </p>
+
+  <section class="panel">
+    <h2>Documents</h2>
+    <ul id="doc-list" class="doc-list"></ul>
+    <form id="upload-form">
+      <input id="upload-input" type="file" multiple accept=".pdf,.txt,.md,.markdown" />
+      <button id="upload-button" type="submit">Add</button>
+    </form>
+    <p id="upload-status" class="status" hidden></p>
+  </section>
+
+  <form id="ask-form" class="ask-form">
+    <input id="query" type="text" placeholder="Ask something about your documents…" autocomplete="off" />
+    <button id="ask-button" type="submit">Ask</button>
+  </form>
+
+  <p id="status" class="status" hidden></p>
+  <div id="result" hidden>
+    <div class="verdict-row">
+      <span id="badge" class="badge"></span>
+      <span id="confidence" class="confidence"></span>
+    </div>
+    <ol id="excerpts" class="excerpts"></ol>
+  </div>
+</main>
+
+<script>
+  const docList = document.getElementById("doc-list");
+  const uploadForm = document.getElementById("upload-form");
+  const uploadInput = document.getElementById("upload-input");
+  const uploadButton = document.getElementById("upload-button");
+  const uploadStatus = document.getElementById("upload-status");
+
+  const form = document.getElementById("ask-form");
+  const input = document.getElementById("query");
+  const button = document.getElementById("ask-button");
+  const statusEl = document.getElementById("status");
+  const resultEl = document.getElementById("result");
+  const badgeEl = document.getElementById("badge");
+  const confidenceEl = document.getElementById("confidence");
+  const excerptsEl = document.getElementById("excerpts");
+
+  const VERDICT_LABEL = { answered: "Answered", partial: "Partial", not_found: "Not found" };
+
+  function warnAboutEmpty(data) {
+    if (!data.empty_documents.length) return false;
+    uploadStatus.hidden = false;
+    uploadStatus.className = "status error";
+    uploadStatus.textContent =
+      `No searchable text could be read from: ${data.empty_documents.join(", ")}. ` +
+      "Questions about it won't find anything.";
+    return true;
+  }
+
+  function renderDocs(data) {
+    const names = data.documents;
+    docList.innerHTML = "";
+    if (names.length === 0) {
+      const li = document.createElement("li");
+      li.className = "empty";
+      li.textContent = "No documents yet — add one below.";
+      docList.appendChild(li);
+      return;
+    }
+    for (const name of names) {
+      const li = document.createElement("li");
+      li.className = "doc-chip";
+      const label = document.createElement("span");
+      label.textContent = name;
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.textContent = "×";
+      remove.title = `Remove ${name}`;
+      remove.addEventListener("click", () => removeDocument(name));
+      li.append(label, remove);
+      docList.appendChild(li);
+    }
+  }
+
+  async function loadDocuments() {
+    const response = await fetch("/api/documents");
+    const data = await response.json();
+    renderDocs(data);
+    warnAboutEmpty(data);
+  }
+
+  async function removeDocument(name) {
+    uploadStatus.hidden = false;
+    uploadStatus.className = "status";
+    uploadStatus.textContent = `Removing ${name}…`;
+    try {
+      const response = await fetch(`/api/documents/${encodeURIComponent(name)}`, { method: "DELETE" });
+      if (!response.ok) {
+        const body = await response.json().catch(() => null);
+        throw new Error(body?.detail ?? `Request failed (${response.status})`);
+      }
+      const data = await response.json();
+      renderDocs(data);
+      uploadStatus.hidden = true;
+      warnAboutEmpty(data);
+    } catch (err) {
+      uploadStatus.className = "status error";
+      uploadStatus.textContent = err instanceof Error ? err.message : "Could not remove that document.";
+    }
+  }
+
+  uploadForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const files = uploadInput.files;
+    if (!files || files.length === 0) return;
+
+    uploadButton.disabled = true;
+    uploadStatus.hidden = false;
+    uploadStatus.className = "status";
+    uploadStatus.textContent = "Ingesting… scanned PDFs are OCR'd, which can take a minute or more.";
+
+    const body = new FormData();
+    for (const file of files) body.append("files", file);
+
+    try {
+      const response = await fetch("/api/documents", { method: "POST", body });
+      if (!response.ok) {
+        const errBody = await response.json().catch(() => null);
+        throw new Error(errBody?.detail ?? `Request failed (${response.status})`);
+      }
+      const data = await response.json();
+      renderDocs(data);
+      uploadStatus.textContent = `Ready — ${data.passage_count} passages indexed.`;
+      warnAboutEmpty(data);
+      uploadForm.reset();
+    } catch (err) {
+      uploadStatus.className = "status error";
+      uploadStatus.textContent = err instanceof Error ? err.message : "Upload failed.";
+    } finally {
+      uploadButton.disabled = false;
+    }
+  });
+
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const q = input.value.trim();
+    if (!q) return;
+
+    button.disabled = true;
+    resultEl.hidden = true;
+    statusEl.hidden = false;
+    statusEl.className = "status";
+    statusEl.textContent = "Judging passages…";
+
+    try {
+      const response = await fetch(`/api/ask?q=${encodeURIComponent(q)}`);
+      if (!response.ok) {
+        const body = await response.json().catch(() => null);
+        throw new Error(body?.detail ?? `Request failed (${response.status})`);
+      }
+      const data = await response.json();
+      render(data);
+      statusEl.hidden = true;
+    } catch (err) {
+      statusEl.className = "status error";
+      statusEl.textContent = err instanceof Error ? err.message : "Something went wrong.";
+    } finally {
+      button.disabled = false;
+    }
+  });
+
+  function render(data) {
+    badgeEl.textContent = VERDICT_LABEL[data.verdict] ?? data.verdict;
+    badgeEl.className = `badge ${data.verdict}`;
+    confidenceEl.textContent = `confidence ${data.confidence.toFixed(2)}`;
+
+    excerptsEl.innerHTML = "";
+    if (data.excerpts.length === 0) {
+      const li = document.createElement("li");
+      li.className = "empty";
+      li.textContent = "No relevant passages were found.";
+      excerptsEl.appendChild(li);
+    } else {
+      for (const excerpt of data.excerpts) {
+        const li = document.createElement("li");
+        li.className = "excerpt";
+        const p = document.createElement("p");
+        p.textContent = excerpt.text;
+        const scores = document.createElement("div");
+        scores.className = "scores";
+        scores.textContent = `${excerpt.source} · relevant ${excerpt.relevant.toFixed(2)} · usable ${excerpt.usable.toFixed(2)}`;
+        li.append(p, scores);
+        excerptsEl.appendChild(li);
+      }
+    }
+    resultEl.hidden = false;
+  }
+
+  loadDocuments();
+</script>
+</body>
+</html>

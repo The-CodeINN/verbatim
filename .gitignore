@@ -1,0 +1,18 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+.env
+
+# OCR results for scanned PDFs (regenerable)
+.cache/
+
+# Your documents stay local: only the empty folder is tracked
+corpus/*
+!corpus/.gitkeep
